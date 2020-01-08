@@ -1,0 +1,59 @@
+Datasets:
+  train:
+    class_name: PaddedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: train
+    rename_dict:
+      image: features
+      text: targets
+    shuffle: true
+    num_workers: 2
+    pin_memory: true
+  dev:
+    class_name: PaddedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: test
+    rename_dict:
+      image: features
+      text: targets
+
+Model:
+  class_name: distsup.models.sequential.CTCModel
+  num_classes: 256
+  allow_too_long_transcripts: true
+  encoder:
+    class_name: distsup.modules.encoders.DeepSpeech2
+    num_input_channels: 1
+    input_height: 32
+    conv_strides: [[2, 2], [2, 2], [1, 1], [1, 2], [1, 1], [1, 2], [1, 1]]
+    conv_kernel_sizes: [[3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 2]]
+    conv_num_features: [64, 128, 256, 256, 512, 512, 512]
+    rnn_hidden_size: 32
+    rnn_projection_size: 32
+    rnn_normalization: none
+    rnn_subsample: [1, 1]
+    rnn_nb_layers: 2
+
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  gradient_clipping:
+    clip_norm: 200.0
+  learning_rate: 0.005
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.5
+    patience: 3
+  output_frequency: 1
+  num_epochs: 100
+  optimizer_name: Adam
+  optimizer_kwargs:
+    betas: [0.9, 0.9999]
+  weight_noise: 0.0
+  weight_noise_start_iteration: 10000
+  polyak_decay:
+  - 0.9998

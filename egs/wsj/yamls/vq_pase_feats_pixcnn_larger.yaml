@@ -1,0 +1,106 @@
+Datasets:
+  train:
+    batch_size: 32
+    class_name: FixedDatasetLoader
+    dataset:
+      chunk_len: 96
+      class_name: distsup.data.ChunkedDataset
+      dataset:
+        class_name: egs.wsj.data.WSJData
+        split: train_si284
+        text_fname: text_phn
+        vocab_fname: vocabulary_phn.txt
+        split_by_space: true
+        ali_file: text_ali
+        modalities:
+          features: pase
+      oversample: 4
+      training: true
+      varlen_fields: [features, alignment]
+      drop_fields: [targets, text, alignment_rle]
+    shuffle: true
+  dev:
+    class_name: PaddedDatasetLoader
+    batch_size: 8
+    dataset:
+      class_name: egs.wsj.data.WSJData
+      split: test_dev93
+      text_fname: text_phn
+      vocab_fname: vocabulary_phn.txt
+      split_by_space: true
+      ali_file: text_ali
+      modalities:
+        features: pase
+    num_workers: 4
+    #pin_memory: true
+  test:
+    class_name: PaddedDatasetLoader
+    batch_size: 8
+    dataset:
+      class_name: egs.wsj.data.WSJData
+      split: test_eval92
+      text_fname: text_phn
+      vocab_fname: vocabulary_phn.txt
+      split_by_space: true
+      ali_file: text_ali
+      modalities:
+        features: pase
+    num_workers: 4
+
+Model:
+  class_name: distsup.models.representation_learners.RepresentationLearner
+  in_channels: 1
+  image_height: 100
+  bottleneck:
+    class_name: distsup.modules.bottlenecks.VQBottleneck
+    num_tokens: 1024
+  encoder:
+    class_name: distsup.modules.convolutional.ConvStack2D
+    out_channels: 64
+    hid_channels: 256
+    num_strided: 1
+    strides: [3]
+  reconstructor:
+    class_name: distsup.modules.reconstructors.ColumnGatedPixelCNN
+    hid_channels: 64
+    reconstruction_channel: 0
+    quantizer:
+      class_name: distsup.modules.quantizers.SoftmaxQuantizer
+      levels: [-1.9530852 , -1.7284005 , -1.5876112 , -1.4978249 , -1.4173771 ,
+              -1.339192  , -1.2740152 , -1.2111483 , -1.1495873 , -1.0888968 ,
+              -1.0342782 , -0.9816667 , -0.93131596, -0.8768976 , -0.82089734,
+              -0.7643442 , -0.7053138 , -0.6469244 , -0.58405584, -0.52547514,
+              -0.45990476, -0.39368019, -0.3199903 , -0.24699803, -0.18008633,
+              -0.11815459, -0.05262136,  0.01312537,  0.07447001,  0.1358178 ,
+                0.19516519,  0.25697222,  0.3113174 ,  0.37070978,  0.4314164 ,
+                0.49065787,  0.56037414,  0.6332032 ,  0.7052329 ,  0.77813464,
+                0.843494  ,  0.90251267,  0.9609936 ,  1.0317255 ,  1.101294  ,
+                1.1816055 ,  1.2701552 ,  1.343959  ,  1.4179286 ,  1.490372  ,
+                1.5696365 ,  1.6645858 ,  1.7577237 ,  1.8494363 ,  1.9660066 ,
+                2.1031072 ,  2.2526898 ,  2.4071977 ,  2.594809  ,  2.76624   ,
+                2.917514  ,  3.1646917 ,  3.5152757 ,  3.855438  ]
+
+  probes: !include ${DISTSUP_DIR}/yamls/_default_probes.yaml
+
+Trainer:
+  checkpointer:
+    every_n_hours: 1
+  gradient_clipping:
+    clip_norm: 100.0
+  learning_rate: 0.002
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.8
+    min_lr: 2.0e-05
+    patience: 2
+  num_epochs: 50
+  optimizer_kwargs:
+    betas:
+    - 0.9
+    - 0.999
+  optimizer_name: Adam
+  output_frequency: 1
+  polyak_decay:
+  - 0.998
+  weight_noise: 0.0
+  weight_noise_start_iteration: 10000

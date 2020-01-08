@@ -1,0 +1,33 @@
+Datasets:
+  train:
+    class_name: FixedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.mnist.custom_data.MnistDataSet
+      train: True
+    shuffle: true
+  dev:
+    class_name: FixedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.mnist.custom_data.MnistDataSet
+      train: False
+
+Model:
+  class_name: distsup.models.som_vae.SOMVAEMnist
+  som_dim: [5, 5]
+  latent_dim: 128
+
+Trainer:
+  checkpointer:
+    every_n_hours: 0.15
+  learning_rate: 0.001
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.25
+    patience: 5
+  output_frequency: 100
+  num_epochs: 50
+  optimizer_name: Adam
+  optimizer_kwargs:
+    weight_decay: 0.0001

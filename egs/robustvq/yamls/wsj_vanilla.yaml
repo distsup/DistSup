@@ -1,0 +1,154 @@
+Datasets:
+  dev:
+    batch_size: 32
+    class_name: PaddedDatasetLoader
+    dataset:
+      ali_file: text_ali
+      class_name: egs.wsj.data.WSJData
+      cmvn_normalize_var: true
+      split: test_dev93
+      split_by_space: true
+      text_fname: text_phn
+      vocab_fname: vocabulary_phn.txt
+    num_workers: 4
+    pin_memory: true
+  test:
+    batch_size: 32
+    class_name: PaddedDatasetLoader
+    dataset:
+      ali_file: text_ali
+      class_name: egs.wsj.data.WSJData
+      cmvn_normalize_var: true
+      split: test_eval92
+      split_by_space: true
+      text_fname: text_phn
+      vocab_fname: vocabulary_phn.txt
+    num_workers: 4
+    pin_memory: true
+  train:
+    batch_size: 32
+    class_name: PaddedDatasetLoader
+    dataset:
+      chunk_len: 64
+      class_name: distsup.data.ChunkedDataset
+      dataset:
+        ali_file: text_ali
+        class_name: egs.wsj.data.WSJData
+        cmvn_normalize_var: true
+        split: train_si284
+        split_by_space: true
+        text_fname: text_phn
+        vocab_fname: vocabulary_phn.txt
+      drop_fields:
+      - targets
+      - text
+      - alignment_rle
+      training: true
+      varlen_fields:
+      - features
+      - alignment
+    num_workers: 6
+    pin_memory: true
+    shuffle: true
+Model:
+  aux_heads:
+    enc_sup:
+      bp_to_main: true
+      layer: latent_mixer
+      learning_rate: 50
+      predictor:
+        aggreg: 1
+        class_name: distsup.modules.predictors.CTCPredictor
+        loss_reduction: mean
+      target: alignment
+  bottleneck:
+    class_name: distsup.modules.bottlenecks.VQBottleneck
+    log_input_norms: true
+    num_tokens: 2048
+  class_name: distsup.models.representation_learners.RepresentationLearner
+  encoder:
+    class_name: distsup.modules.encoders.DeepSpeech2
+    conv_kernel_sizes:
+    - - 7
+      - 7
+    - - 7
+      - 7
+    conv_strides:
+    - - 1
+      - 2
+    - - 3
+      - 1
+    rnn_hidden_size: 320
+    rnn_nb_layers: 4
+    rnn_normalization: none
+  image_height: 81
+  in_channels: 3
+  probes:
+    bottleneck:
+      bp_to_main: false
+      layer: bottleneck
+      predictor:
+        aggreg: 3
+        class_name: distsup.modules.predictors.FramewisePredictor
+        use_two_layer_predictor: true
+      target: alignment
+    bottleneck_ctc:
+      bp_to_main: false
+      layer: bottleneck
+      predictor:
+        aggreg: 3
+        class_name: distsup.modules.predictors.CTCPredictor
+      target: alignment
+    bottleneck_mapping_ctc:
+      bp_to_main: false
+      layer: bottleneck
+      predictor:
+        class_name: distsup.modules.predictors.MappingCTCPredictor
+      requires: bottleneck.num_tokens
+      target: alignment
+      which_out: 2
+    input:
+      bp_to_main: false
+      layer: input_layer
+      predictor:
+        aggreg: 3
+        class_name: distsup.modules.predictors.FramewisePredictor
+        use_two_layer_predictor: true
+      target: alignment
+    latent_mixer:
+      bp_to_main: false
+      layer: latent_mixer
+      predictor:
+        aggreg: 3
+        class_name: distsup.modules.predictors.FramewisePredictor
+        use_two_layer_predictor: true
+      target: alignment
+  reconstructor:
+    class_name: distsup.modules.reconstructors.NullReconstructor
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  gradient_clipping:
+    clip_norm: 1000
+    skip_step_norm: 10000
+  learning_rate: 0.0005
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.MultiStepLR
+    gamma: 0.5
+    milestones:
+    - 32
+    - 37
+    - 42
+    - 47
+    - 52
+    - 57
+    - 62
+    - 67
+    - 72
+  num_epochs: 85
+  optimizer_name: Adam
+  output_frequency: 1
+  polyak_decay:
+  - 0.998
+  weight_noise: 0.0
+  weight_noise_start_iteration: 20000

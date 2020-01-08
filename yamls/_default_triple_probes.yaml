@@ -1,0 +1,36 @@
+input:
+  layer: input_layer
+  target: alignment
+  predictor:
+    class_name: distsup.modules.predictors.TripleFramewisePredictor
+    aggreg: 3
+  bp_to_main: False
+bottleneck:
+  layer: bottleneck
+  target: alignment
+  predictor:
+    class_name: distsup.modules.predictors.TripleFramewisePredictor
+    aggreg: 3
+  bp_to_main: False
+bottleneck_ctc:
+  layer: bottleneck
+  target: alignment
+  predictor:
+    class_name: distsup.modules.predictors.CTCPredictor
+    aggreg: 3
+  bp_to_main: False
+bottleneck_mapping_ctc:
+  layer: bottleneck
+  target: alignment
+  requires: bottleneck.num_tokens
+  which_out: 2  # Collect the third output of `bottleneck` module
+  predictor:
+    class_name: distsup.modules.predictors.MappingCTCPredictor
+  bp_to_main: False
+latent_mixer:
+  layer: latent_mixer
+  target: alignment
+  predictor:
+    class_name: distsup.modules.predictors.TripleFramewisePredictor
+    aggreg: 3
+  bp_to_main: False

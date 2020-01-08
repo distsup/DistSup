@@ -1,0 +1,57 @@
+Datasets:
+  train:
+    class_name: FixedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: distsup.data.ChunkedDataset
+      dataset:
+        class_name: egs.scribblelens.data.ScribbleLensDataset
+        split: unsupervised
+        alignment_root: "data/scribblelens.paths.1.4b.zip"
+        vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+      chunk_len: 96
+      training: true
+      varlen_fields: [image, alignment]
+      drop_fields: [text, alignment_rle, page_side, page]
+    rename_dict:
+        image: features
+    shuffle: true
+    num_workers: 4
+  dev:
+    class_name: PaddedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: test
+      alignment_root: "data/scribblelens.paths.1.4b.zip"
+      vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+    rename_dict:
+        image: features
+    # drop_fields: [text, alignment_rle, page_side, page]
+    num_workers: 4
+
+Model:
+  class_name: distsup.models.representation_learners.RepresentationLearner
+  image_height: 32
+  bottleneck:
+    class_name: distsup.modules.bottlenecks.VQBottleneck
+    num_tokens: 128
+  reconstructor:
+    class_name: distsup.modules.reconstructors.Decoder_2d
+  probes: !include ${DISTSUP_DIR}/yamls/_default_probes.yaml
+
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  gradient_clipping:
+    clip_norm: 10.0
+  learning_rate: 0.001
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.5
+    patience: 2
+  output_frequency: 5
+  num_epochs: 50
+  optimizer_name: Adam
+  polyak_decay:
+  - 0.998

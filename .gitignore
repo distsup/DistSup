@@ -1,0 +1,23 @@
+# vim
+*.swp
+*.swo
+*.swn
+
+# Python
+__pycache__
+*.pyc
+*.ipynb_checkpoints
+*~
+
+# Os
+.nfs*
+
+# Experiments
+runs/*
+data/*
+
+# GUIs
+.project
+.settings
+.pydevproject
+.vscode

@@ -1,0 +1,77 @@
+Datasets:
+  train:
+    class_name: PaddedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.wsj.data.WSJData
+      split: train_si284
+      text_fname: text_phn
+      vocab_fname: vocabulary_phn.txt
+      split_by_space: true
+      ali_file: text_ali
+    shuffle: true
+    num_workers: 6
+    #pin_memory: true
+  dev:
+    class_name: PaddedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.wsj.data.WSJData
+      split: test_dev93
+      text_fname: text_phn
+      vocab_fname: vocabulary_phn.txt
+      split_by_space: true
+      ali_file: text_ali
+    num_workers: 4
+    #pin_memory: true
+  test:
+    class_name: PaddedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.wsj.data.WSJData
+      split: test_eval92
+      text_fname: text_phn
+      vocab_fname: vocabulary_phn.txt
+      split_by_space: true
+      ali_file: text_ali
+    num_workers: 4
+    #pin_memory: true
+
+Model:
+  class_name: distsup.models.representation_learners.RepresentationLearner
+  image_height: 81
+  in_channels: 3
+  bottleneck:
+    class_name: distsup.modules.bottlenecks.VQBottleneck
+    num_tokens: 128
+    criterion: 'segmental'
+  encoder:
+    class_name: distsup.modules.convolutional.ConvStack2D
+    out_channels: 64
+    hid_channels: 256
+    num_strided: 1
+    strides: [3]
+  reconstructor:
+    class_name: distsup.modules.reconstructors.Decoder_2d
+    hid_channels: 256
+    stride: 3
+    use_sigmoid: false
+    use_pixelshuffle: false
+    out_channels: 3
+  probes: !include ${DISTSUP_DIR}/yamls/_default_probes.yaml
+
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  gradient_clipping:
+    clip_norm: 20.0
+  learning_rate: 0.001
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.5
+    patience: 2
+  output_frequency: 300
+  num_epochs: 101
+  optimizer_name: Adam
+  polyak_decay:
+  - 0.9998

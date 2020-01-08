@@ -1,0 +1,141 @@
+Datasets:
+  dev:
+    batch_size: 32
+    class_name: PaddedDatasetLoader
+    dataset:
+      alignment_root: data/scribblelens.paths.1.4b.zip
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      slice: tasman
+      split: test
+      transcript_mode: 5
+      vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+    rename_dict:
+      image: features
+  train:
+    batch_size: 32
+    class_name: FixedDatasetLoader
+    dataset:
+      chunk_len: 128
+      class_name: distsup.data.ChunkedDataset
+      dataset:
+        alignment_root: data/scribblelens.paths.1.4b.zip
+        class_name: egs.scribblelens.data.ScribbleLensDataset
+        slice: tasman
+        split: train
+        transcript_mode: 5
+        vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+      drop_fields:
+      - text
+      - alignment_rle
+      - page_side
+      - page
+      oversample: 4
+      training: true
+      varlen_fields:
+      - image
+      - alignment
+    num_workers: 4
+    pin_memory: true
+    rename_dict:
+      image: features
+    shuffle: true
+Model:
+  bottleneck:
+    class_name: distsup.modules.bottlenecks.VQBottleneck
+    num_tokens: 128
+    reestimation_reservoir_size: 10240
+    reestimate_every_iters: 1.5
+    reestimate_every_iters_expansion: true
+    reestimate_max_epochs: 5
+    ignore_masked: true
+    criterion: segmental
+    criterion_eval: hmm_segmental
+    criterion_kwargs:
+        segment_frac: 0.4
+  bottleneck_latent_dim: 64
+  class_name: distsup.models.representation_learners.RepresentationLearner
+  encoder:
+    class_name: distsup.modules.encoders.DeepSpeech2
+    conv_kernel_sizes:
+    - - 3
+      - 3
+    - - 5
+      - 5
+    - - 3
+      - 3
+    - - 3
+      - 3
+    - - 3
+      - 3
+    - - 3
+      - 3
+    - - 3
+      - 2
+    conv_nonlinearity: leakyrelu
+    conv_num_features:
+    - 64
+    - 128
+    - 256
+    - 256
+    - 512
+    - 512
+    - 512
+    conv_strides:
+    - - 1
+      - 2
+    - - 2
+      - 2
+    - - 1
+      - 1
+    - - 1
+      - 2
+    - - 1
+      - 1
+    - - 1
+      - 2
+    - - 1
+      - 1
+    rnn_bias: true
+    rnn_bidirectional: true
+    rnn_dropout: 0
+    rnn_hidden_size: 32
+    rnn_nb_layers: 2
+    rnn_normalization: batch_norm
+    rnn_projection_size: 32
+    rnn_residual: true
+    rnn_subsample:
+    - 1
+    - 1
+  image_height: 32
+  probes: !include ${DISTSUP_DIR}/yamls/_default_probes.yaml
+  reconstructor:
+    lr:
+      class_name: distsup.modules.reconstructors.ColumnGatedPixelCNN
+      hid_channels: 64
+      n_layers: 7
+    rl:
+      class_name: distsup.modules.reconstructors.RightToLeftReconstructor
+      wrapped_class_name: distsup.modules.reconstructors.ColumnGatedPixelCNN
+      hid_channels: 64
+      n_layers: 7
+Trainer:
+  checkpointer:
+    every_n_hours: 1
+  gradient_clipping:
+    clip_norm: 100.0
+  learning_rate: 0.002
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.8
+    min_lr: 2.0e-05
+    patience: 2
+  num_epochs: 50
+  optimizer_kwargs:
+    betas:
+    - 0.9
+    - 0.999
+  optimizer_name: Adam
+  output_frequency: 1
+  polyak_decay:
+  - 0.998
+  weight_noise: 0.0

@@ -1,0 +1,38 @@
+Datasets:
+  train:
+    class_name: FixedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.mnist.Dataset
+      train: True
+    shuffle: true
+  dev:
+    class_name: FixedDatasetLoader
+    batch_size: 32
+    dataset:
+      class_name: egs.mnist.Dataset
+      train: False
+
+Model:
+  class_name: distsup.models.simple.MNISTConvNet
+  num_classes: 10
+
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  gradient_clipping:
+    clip_norm: 10.0
+  learning_rate: 0.1
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.5
+    patience: 2
+  output_frequency: 100
+  num_epochs: 100
+  optimizer_name: SGD
+  optimizer_kwargs:
+    momentum: 0.5
+  weight_noise: 0.05
+  weight_noise_start_iteration: 10000
+  polyak_decay:
+  - 0.9998

@@ -1,0 +1,89 @@
+Datasets:
+  train:
+    class_name: PaddedDatasetLoader
+    batch_size: 1
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: train
+      slice: tasman
+      vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+      #alignment_root: data/scribblelens.paths.1.4b.zip
+      transcript_mode: 5
+    rename_dict:
+      image: features
+      text: targets
+    shuffle: true
+    # num_workers: 2
+    # pin_memory: true
+  dev:
+    class_name: PaddedDatasetLoader
+    batch_size: 1
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: test
+      slice: tasman
+      #slice: custom
+      #slice_filename: testcase1.dat
+      vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+      #alignment_root: data/scribblelens.paths.1.4b.zip
+      transcript_mode: 5
+    rename_dict:
+      image: features
+      text: targets
+
+Model:
+  class_name: distsup.models.sequential.CTCModel
+  allow_too_long_transcripts: true
+  verbose: 0 # 0 is the most quiet setting
+
+  #alignment_name: mypath.path
+  #forced_alignment: True
+
+  encoder:
+    class_name: distsup.modules.encoders.DeepSpeech2
+
+    # Convolutional top layers
+    num_input_channels: 1
+    input_height: 32
+    conv_strides: [[1, 2], [2, 2], [1, 1], [1, 2], [1, 1], [1, 2], [1, 1]] # Best setup so far v3, 2x longer path than ORG
+    conv_kernel_sizes: [[3, 3], [5, 5], [3, 3], [3, 3], [3, 3], [3, 3], [3, 2]]   # Best setup so far v3
+    #conv_strides: [[1, 2], [3, 2], [1, 1], [1, 2], [1, 1], [1, 2], [1, 1]] # Better v2 : Longer sequences 1.5 longer, better path
+    #conv_kernel_sizes: [[3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 2]]
+    #conv_strides: [[2, 2], [2, 2], [1, 1], [1, 2], [1, 1], [1, 2], [1, 1]] # ORG v1
+    #conv_kernel_sizes: [[3, 3], [5, 5], [3, 3], [3, 3], [3, 3], [3, 3], [3, 2]]  # ORG v1 
+
+    conv_num_features: [64, 128, 256, 256, 512, 512, 512]
+    conv_nonlinearity: leakyrelu # hardtanh, leakyrelu, relu
+
+    # (B)LSTM + CTC
+    rnn_hidden_size: 32
+    rnn_projection_size: 32
+    rnn_normalization: batch_norm # Choices: batch_norm, none, or instance_norm. Active BN is very effective here.
+    rnn_subsample: [1, 1]
+    rnn_nb_layers: 2
+    rnn_bidirectional: True
+    rnn_bias: True
+    rnn_residual: True
+    rnn_dropout: 0      # If larger than 0 then put a drop-out layer in between LSTM
+
+Trainer:
+  checkpointer:
+    every_n_hours: 1
+  gradient_clipping:
+    clip_norm: 100.0
+  learning_rate: 5.e-4
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.8
+    patience: 2
+    min_lr: 2.e-5
+  output_frequency: 1
+  num_epochs: 100
+  optimizer_name: Adam
+  optimizer_kwargs:
+    # Default beta2: 0.9999. Aim roughly for (1.-beta2)^nSamples ~~ 0.3 iff you want momentum at end of train dataset
+    betas: [0.9, 0.999]
+  weight_noise: 0.0
+  weight_noise_start_iteration: 10000
+  polyak_decay:
+  - 0.998

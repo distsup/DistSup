@@ -1,0 +1,54 @@
+Datasets:
+  train:
+    class_name: PaddedDatasetLoader
+    batch_size: 16
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: train
+      transcript_mode: 4
+      #target_height: 32
+      alignment_root: data/scribblelens.paths.1.4b.zip
+    rename_dict:
+      image: features
+      text: targets
+      scribe_id: adversarial
+    shuffle: true
+    num_workers: 2
+    pin_memory: true
+  dev:
+    class_name: PaddedDatasetLoader
+    batch_size: 16
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: test
+      transcript_mode: 4
+      #target_height: 32
+      alignment_root: data/scribblelens.paths.1.4b.zip
+    rename_dict:
+      image: features
+      text: targets
+      scribe_id: adversarial
+
+Model:
+  class_name: distsup.models.vqvae.vqvae_nanxin
+  input_height: 32
+  adversarial_size: 8
+  with_framewise_probe: True
+  codebook_size: 200
+
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  gradient_clipping:
+    clip_norm: 10.0
+  learning_rate: 0.002
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.5
+    patience: 2
+  output_frequency: 100
+  log_frequency: 10
+  num_epochs: 100
+  optimizer_name: Adam
+  polyak_decay:
+  - 0.9998

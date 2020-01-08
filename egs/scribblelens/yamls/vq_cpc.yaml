@@ -1,0 +1,75 @@
+Datasets:
+  train:
+    class_name: PaddedDatasetLoader
+    batch_size: 2
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: unsupervised
+      transcript_mode: 5
+      vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+      alignment_root: data/scribblelens.paths.1.4b.zip
+    rename_dict:
+      image: features
+      text: targets
+    shuffle: true
+  dev:
+    class_name: PaddedDatasetLoader
+    batch_size: 2
+    dataset:
+      class_name: egs.scribblelens.data.ScribbleLensDataset
+      split: test
+      transcript_mode: 5
+      vocabulary: egs/scribblelens/tasman.alphabet.plus.space.mode5.json
+      alignment_root: data/scribblelens.paths.1.4b.zip
+    rename_dict:
+      image: features
+      text: targets
+
+Model:
+  class_name: distsup.models.representation_learners.RepresentationLearner
+  image_height: 32
+  bottleneck:
+    class_name: distsup.modules.bottlenecks.VQBottleneck
+    num_tokens: 128
+
+  reconstructor:
+    class_name: distsup.modules.reconstructors.ColumnGatedPixelCNN
+    quantizer:
+      class_name: distsup.modules.quantizers.SoftmaxUniformQuantizer
+      num_levels: 4
+    len_dilation_stage: 1
+    n_layers: 10
+    hid_channels: 64
+
+  probes: !include ${DISTSUP_DIR}/yamls/_default_probes.yaml
+
+  aux_heads:
+    cpc_head:
+      layer: bottleneck
+      target: alignment
+      predictor:
+        class_name: distsup.modules.cpc_module.CPCModule
+        k: 6
+        N: 5
+        gru_hidden_dim: 64
+        compute_kcer: False
+        loss_details: False
+      bp_to_main: true
+
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  gradient_clipping:
+    clip_norm: 100.0
+  learning_rate: 0.0005
+  learning_rate_scheduler:
+    class_name: torch.optim.lr_scheduler.ReduceLROnPlateau
+    factor: 0.5
+    patience: 2
+  output_frequency: 1
+  num_epochs: 100
+  optimizer_name: Adam
+  optimizer_kwargs:
+    betas: [0.9, 0.999]
+  polyak_decay:
+  - 0.9998
