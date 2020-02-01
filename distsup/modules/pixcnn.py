@@ -203,6 +203,8 @@ class BasePixelCNN(nn.Module):
                      num_levels=4
                      ),
                  **kwargs):
+        if 'in_dim' in kwargs:
+            del kwargs['in_dim']  # XXX unsupported
         super(BasePixelCNN, self).__init__(**kwargs)
         self.quantizer = utils.construct_from_kwargs(quantizer)
         self.reconstruction_channel = reconstruction_channel

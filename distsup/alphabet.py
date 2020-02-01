@@ -109,7 +109,7 @@ class Alphabet:
         return ch in self.chars
 
     def find_key(self, val):
-        return self.chars.inverse.get(val, self.unk[0])[0]
+        return self.chars.inverse.get(val, self.unk)[0]
 
     def __len__(self):
         return len(self.chars)

@@ -27,7 +27,7 @@ from torch.autograd import Function
 import torch.nn.functional as F
 
 from distsup.configuration import Globals
-from distsup.utils import get_mask1d
+from distsup.utils import construct_from_kwargs, get_mask1d, safe_squeeze
 from distsup.logger import DefaultTensorLogger
 from distsup.modules.encoders import Identity, Normalization
 from distsup.modules.misc import *
@@ -203,15 +203,15 @@ class VQBottleneck(nn.Module):
                  input_projection=True,
                  ):
         super(VQBottleneck, self).__init__()
-        # NOTE This could be Identity()
+        # NOTE This might be Identity()
         self.batch_norm = Normalization(normalization, normalization_nary,
             in_dim, set_affine=normalization_set_affine)
         self.log_input_norms = log_input_norms
+        # TODO Check if batch_norm processes the dimensions in the right order
         if input_projection:
             self.projection = nn.Linear(in_dim, latent_dim)
         else:
-            assert in_dim == latent_dim, (f"Bottleneck: input and latent dims "
-                                           "don't match")
+            assert in_dim == latent_dim, f"No projection to bottleneck, input ({in_dim}) and latent ({latent_dim}) dims dont agree"
             self.projection = Identity()
         self.embedding = nn.Embedding(num_tokens, latent_dim)
         nn.init.xavier_uniform_(self.embedding.weight)
@@ -334,6 +334,8 @@ class VQBottleneck(nn.Module):
             self.reestimation_data[4] = 0
             self.reestimation_reservoir = None
 
+        self.post_reestim_hook()
+
     def pack_x(self, x, x_lens):
         if x_lens is None or self.ignore_masked:
             return x
@@ -352,6 +354,12 @@ class VQBottleneck(nn.Module):
             x = torch.nn.utils.rnn.pad_sequence(
                 x_seqs, batch_first=True).unsqueeze(2)
             return x
+
+    def codebook_train_hook(self, x_flat, codes_one_hot):
+        pass
+
+    def post_reestim_hook(self):
+        pass
 
     def forward(self, x, side_info=None, enc_len=None):
         if self.reestimation_reservoir and self.training:
@@ -428,6 +436,9 @@ class VQBottleneck(nn.Module):
                     self.update_self_loop_bonus(values)
             codes = self.unpack_x(codes, enc_len)
             indices = self.unpack_x(indices, enc_len)
+
+        self.codebook_train_hook(
+            x, F.one_hot(indices, self.embedding.weight.size(0)).float())
 
         self._log_code_usage(indices, criterion)
         if self.needs_global_info:
@@ -541,6 +552,49 @@ class VQBottleneck(nn.Module):
         print(f"HMM segmenter self loop bonus {self.self_loop_bonus_estimate} "
               f"num segments: {num_segments}, ratio {num_segments / float(x_lens.sum())}")
         return quantized, seg_idx
+
+
+class VQBottleneckEMA(VQBottleneck):
+
+    def __init__(self, in_dim, latent_dim, num_tokens,
+                 decay=0.999, epsilon=1e-5,
+                 avg_counts_after_reestim=True, **kwargs):
+        super(VQBottleneckEMA, self).__init__(
+            in_dim=in_dim, latent_dim=latent_dim, num_tokens=num_tokens, **kwargs)
+
+        self.decay = decay
+        self.epsilon = epsilon
+
+        self.embedding.requires_grad = False
+        self.embedding.weight.requires_grad = False
+        self.register_buffer("ema_count", torch.zeros(num_tokens))
+        self.register_buffer("ema_weight", self.embedding.weight.clone())
+        self.avg_counts_after_reestim = avg_counts_after_reestim
+
+    def codebook_train_hook(self, x, codes_one_hot):
+        if self.training:
+            # Sum one hots to 1 x num_tokens (save 1 for multiple codebooks in the future)
+            # B x W x 1 x 1 x NTOKENS --> 1 x BW x NTOKENS
+            one_hots = codes_one_hot.view(1, -1, codes_one_hot.size(-1)).detach()
+            self.ema_count = (self.decay * self.ema_count
+                              + (1 - self.decay) * one_hots.sum(dim=(0,1)))
+
+            # n = num of codes
+            n = torch.sum(self.ema_count, dim=0, keepdim=True)
+            K = self.embedding.weight.size(0)
+            ema_count = (self.ema_count + self.epsilon) / (n + K * self.epsilon) * n
+
+            # N x W x 1 x C --> 1 x NW x C
+            x_flat = x.view(-1, x.size(-1)).unsqueeze(0).detach()
+            dw = torch.bmm(one_hots.transpose(1, 2), x_flat)
+            dw = safe_squeeze(dw, 0)  # Remove multiple codebooks dimension
+            self.ema_weight = self.decay * self.ema_weight + (1 - self.decay) * dw
+            self.embedding.weight.data = self.ema_weight / ema_count.unsqueeze(1)
+
+    def post_reestim_hook(self):
+        self.ema_weight = self.embedding.weight.clone()
+        if self.avg_counts_after_reestim:
+            self.ema_count.fill_(ema_count.mean())
 
 
 class VQBottleneckSparse(VQBottleneck):
@@ -1075,3 +1129,34 @@ class UCBBottleneck(SoftAttentionBottleneck):
         new_indices = scores.argmax(dim=-1)
         logger.log_scalar('ucb/num_switches', (indices != new_indices).sum())
         return scores, new_indices
+
+
+class MultipleBottlenecks(nn.Module):
+    def __init__(self, in_dim, latent_dim, num_bottlenecks=10,
+                 bottleneck=dict(
+                     class_name=VQBottleneck,
+                     num_tokens=16
+                 )):
+                 # bottleneck_latent_dim=64,):
+        super(MultipleBottlenecks, self).__init__()
+        self.num_bottlenecks = num_bottlenecks
+        self.num_tokens = bottleneck['num_tokens']  # XXX For a single VQ
+        self.bottlenecks = nn.ModuleDict({
+            'bottleneck%d' % i: construct_from_kwargs(
+                bottleneck, additional_parameters=dict(
+                    in_dim=in_dim, latent_dim=latent_dim))
+            for i in range(num_bottlenecks)})
+
+    def forward(self, x, *args, **kwargs):
+        # XXX side_info not yet supported
+        nb = self.num_bottlenecks
+        x = x.view(x.size(0), x.size(1), x.size(2), x.size(3) // nb, nb)
+        all_outs = [
+            self.bottlenecks['bottleneck%d' % i](x[:,:,:,:,i], *args, **kwargs)
+            for i in range(nb)]
+
+        ret = [torch.cat(outs, dim=-1) for outs in list(zip(*all_outs))[:2]]
+        # XXX Drop other metrics ('embeddings', 'pre_bn_acts')
+        ret.append({'indices':
+            torch.cat([outs[2]['indices'] for outs in all_outs], dim=-1)})
+        return ret

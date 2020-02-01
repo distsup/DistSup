@@ -188,6 +188,8 @@ class StreamTokenizerNet(probednet.ProbedNet):
 
     def minibatch_loss(self, batch):
         loss, stats, tokens = self.minibatch_loss_and_tokens(batch)
+        if tokens is not None:  # XXX
+            tokens = tokens[:, :, :, :1]  # Drop tokens for mutliple bottlenecks
         detached_loss, backprop_loss, probes_details = self.probes_loss(batch)
         stats.update(probes_details)
         stats['probes_detached_loss'] = detached_loss
@@ -279,6 +281,7 @@ class StreamTokenizerNet(probednet.ProbedNet):
         tot_errs = 0.
 
         alis_es = []
+        alis_es_multi_bottlenecks = []
         alis_gt = []
         alis_lens = []
         total_stats = {}
@@ -297,11 +300,24 @@ class StreamTokenizerNet(probednet.ProbedNet):
             stats.update(probes_details)
 
             if tokens is not None:
+                # Collect tokens for all bottlenecks, continue with the first
+                num_bottlenecks = tokens.size(-1)
+                if num_bottlenecks > 1:
+                    es_bottlenecks = []
+                    for i in range(num_bottlenecks):
+                        tok = utils.safe_squeeze(tokens[:,:,:,i], dim=2)
+                        es = self.align_tokens_to_features(batch, tok)[:, :]
+                        assert(es.shape[0] == batch['features'].shape[0])
+                        assert(es.shape[1] == batch['features'].shape[1])
+                        es_bottlenecks.append(es)
+                    alis_es_multi_bottlenecks.append(es_bottlenecks)
+                    tokens = tokens[:,:,:,:1]
+
                 # Tokens should be in layout B x W x 1 x 1
                 tokens = utils.safe_squeeze(tokens, dim=3)
                 tokens = utils.safe_squeeze(tokens, dim=2)
 
-                feat_len = batch['features_len']
+                feat_len = batch.get('features_len', [1] * tokens.size(0))  # XXX
                 alis_lens.append(feat_len)
 
                 # the tokens should match the rate of the alignment
@@ -395,6 +411,18 @@ class StreamTokenizerNet(probednet.ProbedNet):
 
                 perplexity_scores = self._perplexity_metrics(es, prefix=prefix)
                 all_scores.update(perplexity_scores)
+
+        elif (len(alis_es) > 0) and (len(alis_gt) == 0):
+            es = self._unpad_and_concat(alis_es, alis_lens)
+            perplexity_scores = self._perplexity_metrics(es, prefix='')
+            all_scores.update(perplexity_scores)
+
+        if len(alis_es_multi_bottlenecks) > 0:
+            num_unique = 0
+            for es in zip(*alis_es_multi_bottlenecks):
+                es = self._unpad_and_concat(es, alis_lens)
+                num_unique += len(np.unique(es))
+            all_scores['used_tokens_all_bottlenecks'] = num_unique
 
         return all_scores
 

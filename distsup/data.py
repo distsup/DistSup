@@ -891,3 +891,103 @@ class DistributionMatchingDataset(torch.utils.data.Dataset):
             frame_pair_dataset, batch_size=batch_size, shuffle=True
         )
         return looping_iter(dataloader)
+
+
+class ImageDataset(torch.utils.data.TensorDataset):
+    def __init__(self, path, split):
+        if split == 'train':
+            dset = datasets.SVHN(path, split='train', download=True)
+            feats = (dset.data.astype(np.float32) / 255.0 - 0.5) * 2.0
+            labels = dset.labels
+        elif split == 'dev':
+            dset = datasets.SVHN(path, split='train', download=True)
+            feats = (dset.data[:10000].astype(np.float32) / 255.0 - 0.5) * 2.0
+            labels = dset.labels[:10000]
+        elif split == 'test':
+            print('Note: 10k test samples set aside as dev')
+            dset = datasets.SVHN(path, split='test', download=True)
+            feats = (dset.data[10000:].astype(np.float32) / 255.0 - 0.5) * 2.0
+            labels = dset.labels[10000:]
+        else:
+            raise ValueError('Unknown dataset split')
+        self.num_classes = len(np.unique(labels))
+        super(SVHNDataset, self).__init__(torch.from_numpy(feats),
+                                          torch.from_numpy(labels))
+
+
+class ImageDataset(torch.utils.data.Dataset):
+    """A dataset that loads static (non-temporal) images"""
+
+    def __init__(
+        self,
+        modalities_opts,
+        transform=None,
+        text_file=None,
+        vocabulary_file=None,
+        utt2spk_file=None,
+        ali_file=None,
+        split_by_space=False,
+        cmvn_normalize_var=False,
+    ):
+        self.uttids = {}
+        self.features = {}
+        self.feature_delta_dim = {}
+        self.cmvn = {}
+        self.utt_centered = {}
+
+        assert "features" in modalities_opts, f"Currently modalities_opts requires at least 'features' modality."
+
+        if transform:
+            self.transform = utils.construct_from_kwargs(transform)
+        else:
+            self.transform = None
+
+    def __len__(self):
+        return len(self.common_uttids)
+
+    def __getitem__(self, idx):
+        uttid = self.common_uttids[idx]
+
+        result = {"uttid": uttid}
+
+        result.update({modality: torch.tensor(self._load_feature(self.features[modality][uttid],
+                                                                 self.cmvn[modality],
+                                                                 self.feature_delta_dim[modality],
+                                                                 self.utt_centered[modality]))
+                       for modality in self.features})
+
+        feature_lengths = {modality: result[modality].size(0) for modality in self.features}
+
+        if len(set(feature_lengths.values())) != 1:
+            utils.log(f"The features selected in the SpeechDataset have different lengths.",
+                      extra_msg=f"Feature lengths: {feature_lengths}. "
+                      f"Using the length of 'features' "
+                      f"for the alignments.",
+                      level=logging.WARNING,
+                      once=True)
+
+        feature_length = feature_lengths['features']
+
+        if self.align:
+            alignment = self.align[uttid]
+            align = np.zeros(feature_length)
+            align_rle = np.zeros((len(alignment), 2))
+            for (i, seq) in enumerate(alignment):
+                align[seq[1]: seq[2]] = seq[0]
+                align_rle[i] = [seq[1], seq[2]]
+            result["alignment"] = torch.tensor(align, dtype=torch.int64)
+            result["alignment_rle"] = torch.tensor(align_rle, dtype=torch.int64)
+
+            for modality in self.features:
+                self._align_features_to_alignment(result, modality)
+
+        if self.text:
+            result["targets"] = torch.tensor(self.text_int[uttid])
+
+        if self.utt2spk is not None:
+            result["spk"] = self.utt2spk[uttid]
+            result["spkid"] = self.speakers_to_idx[result["spk"]]
+
+        if self.transform:
+            result = self.transform(result)
+        return result

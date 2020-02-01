@@ -17,7 +17,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
+
 import torch
+from torch import distributions
 from torch import nn
 import torch.nn.functional as F
 
@@ -130,3 +133,223 @@ class ConvStack1D(nn.Module):
         else:
             lens = (lens + self.length_reduction - 1) // self.length_reduction
             return x, lens
+
+
+class NDRLResidual(nn.Module):
+
+    def __init__(self, hid=256, batch_norm=False, relu_before_add=True,
+                 relu_first=False):
+        super(NDRLResidual, self).__init__()
+        if relu_first:
+            assert relu_before_add
+            layers = [
+                nn.ReLU(),
+                nn.Conv2d(hid, hid, kernel_size=3, padding=1),
+                nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+                nn.ReLU(),
+                nn.Conv2d(hid, hid, kernel_size=1, padding=0),
+                nn.BatchNorm2d(hid, affine=False) if batch_norm else None]
+        else:
+            layers = [
+                nn.Conv2d(hid, hid, kernel_size=3, padding=1),
+                nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+                nn.ReLU(),
+                nn.Conv2d(hid, hid, kernel_size=1, padding=0),
+                nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+                nn.ReLU() if relu_before_add else None]
+        self.conv = nn.Sequential(*[l for l in layers if l is not None])
+        self.relu_before_add = relu_before_add
+
+    def forward(self, x):
+        if self.relu_before_add:
+            return x + self.conv(x)
+        else:
+            return F.relu(x + self.conv(x))
+
+
+class NDRLEncoder(nn.Module):
+    """Encoder for the CIFAR10 model in [1]
+
+    [1] Oord et al., "Neural Discrete Representation Learning", 2017.
+
+    """
+    def __init__(self, in_channels, image_height,
+                 hid=256, out_dim=None, num_layers=2, batch_norm=False,
+                 out_relu=False):
+        # Reduces 32x32 to 8x8
+        super(NDRLEncoder, self).__init__()
+        del in_channels  # unused
+        del image_height  # unused
+        assert num_layers >= 2
+        # 32x32 is reduced to 8x8, but we make HW a single dimension 8x8=64
+        # in order to embed every field of the map with VQBottleneck
+        self.length_reduction = 0.5
+        layers = [nn.Conv2d(3, hid, kernel_size=4, stride=2, padding=1),
+                  nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+                  nn.ReLU(),
+                  nn.Conv2d(hid, hid, kernel_size=4, stride=2, padding=1),
+                  nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+                  nn.ReLU()]
+        for i in range(2, num_layers):
+            layers.extend([
+                nn.Conv2d(hid, hid, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+                nn.ReLU()])
+        self.conv = nn.Sequential(*[l for l in layers if l is not None])
+        self.residual = nn.Sequential(NDRLResidual(batch_norm=batch_norm),
+                                      NDRLResidual(batch_norm=batch_norm))
+        layers = [
+            nn.Conv2d(hid, out_dim or hid, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(out_dim, affine=False) if batch_norm else None,
+            nn.ReLU() if out_relu else None,
+        ]
+        self.out_conv = nn.Sequential(*[l for l in layers if l is not None])
+
+    def forward(self, x, x_len=None):
+        del x_len  # unused
+        # NHWC -> NCHW
+        x = x.permute(0, 3, 1, 2)
+        x = self.conv(x)
+        x = self.residual(x)
+        x = self.out_conv(x)
+        # NCHW -> NHWC
+        x = x.permute(0, 2, 3, 1).contiguous()
+        x = x.reshape(x.size(0), x.size(1)*x.size(2), 1, -1)
+        return x
+
+
+class NDRLLucasEncoder(NDRLEncoder):
+
+    def __init__(self, in_channels, image_height, hid=256, out_dim=None):
+        super(NDRLLucasEncoder, self).__init__(in_channels=in_channels, image_height=image_height)
+        # Reduces 32x32 to 8x8
+        del in_channels  # unused
+        del image_height  # unused
+
+        # 32x32 is reduced to 16x16, but we make HW a single dimension
+        # 16x16=256
+        # in order to embed every field of the map with VQBottleneck
+        self.length_reduction = 0.125
+        layers = [nn.Conv2d(3, hid//2, kernel_size=4, stride=2, padding=1),
+                  nn.ReLU(),
+                  nn.Conv2d(hid//2, hid, kernel_size=3, stride=1, padding=1)]
+        self.conv = nn.Sequential(*[l for l in layers if l is not None])
+        self.residual = nn.Sequential(NDRLResidual(relu_first=True),
+                                      NDRLResidual(relu_first=True))
+        layers = [
+            nn.Conv2d(hid, out_dim or hid, kernel_size=1, stride=1, padding=0),
+        ]
+        self.out_conv = nn.Sequential(*[l for l in layers if l is not None])
+
+
+class NDRLReconstructor(nn.Module):
+    """Decoder for the CIFAR10 model in [1]
+
+    [1] Oord et al., "Neural Discrete Representation Learning", 2017.
+
+    """
+    def __init__(self, image_height, cond_channels=None,
+                 hid=256, in_dim=None, num_layers=2, batch_norm=False,
+                 output_type='continuous', fc_with_softmax=False,
+                 output_std_bias_init=None):
+        super(NDRLReconstructor, self).__init__()
+        del image_height  # unused
+        del cond_channels  # unused
+        assert num_layers >= 2
+        assert output_type in ('continuous', 'discrete', 'gaussian')
+        self.output_type = output_type
+
+        layers = [
+            nn.ConvTranspose2d(in_dim or hid, hid, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+            nn.ReLU()]
+        self.in_conv = nn.Sequential(*[l for l in layers if l is not None])
+
+        self.residual = nn.Sequential(NDRLResidual(batch_norm=batch_norm),
+                                      NDRLResidual(batch_norm=batch_norm))
+        layers = []
+        for i in range(num_layers - 2):
+            layers.extend([
+                nn.ConvTranspose2d(hid, hid, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+                nn.ReLU()])
+        out_ch = 3 * 256 if output_type == 'discrete' else 3
+        layers.extend([
+            nn.ConvTranspose2d(hid, hid, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(hid, affine=False) if batch_norm else None,
+            nn.ReLU(),
+            nn.ConvTranspose2d(hid, out_ch, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(out_ch, affine=False) if batch_norm else None,
+            nn.ReLU()])
+        self.conv = nn.Sequential(*[l for l in layers if l is not None])
+
+        if self.output_type == 'gaussian':
+            sz = 32 * 32 * 3
+            self.out_fc = nn.Linear(sz, sz * 2)
+            if output_std_bias_init:
+                self.out_fc.bias.data[sz:].fill_(output_std_bias_init)
+
+    def get_inputs_and_targets(self, feats, feat_lens=None):
+        del feat_lens  # unused
+        return feats, feats
+
+    def get_mean_field_preds(self, feats):
+        return feats  # self.quantizer.mean_field(feats)
+
+    def forward(self, inputs, conds):
+        del inputs  # unused
+        x = conds[0]
+        hw = int(np.sqrt(x.size(1)))
+        x = x.reshape(x.size(0), hw, hw, x.size(3))
+        x = x.permute(0, 3, 1, 2)
+        x = self.in_conv(x)
+        x = self.residual(x)
+        x = self.conv(x)
+        x = x.permute(0, 2, 3, 1)
+        if self.output_type == 'gaussian':
+            # NHWC --> N(HWC) --> NHWC2
+            x = self.out_fc(x.contiguous().view(x.size(0), -1)).view(*x.size(), 2)
+        return x
+
+    def loss(self, logits, targets):
+        if self.output_type == 'continuous':
+            return F.mse_loss(logits, targets, reduction='mean')
+        elif self.output_type == 'discrete':
+            n, h, w, d = logits.size()
+            return F.cross_entropy(
+                logits.view(n, h, w, d // 256, 256).permute(0, 4, 1, 2, 3),
+                ((targets / 2.0 + 0.5) * 255.0).long(),
+                reduction='mean')
+        elif self.output_type == 'gaussian':
+            norm = distributions.normal.Normal(
+                logits[:,:,:,:,0].contiguous().view(-1),
+                torch.exp(logits[:,:,:,:,1].contiguous().view(-1)))
+            return -torch.mean(norm.log_prob(targets.contiguous().view(-1)))
+        else:
+            raise ValueError
+
+
+class NDRLLucasReconstructor(NDRLReconstructor):
+    """Decoder for the CIFAR10 model in [1]
+
+    [1] Oord et al., "Neural Discrete Representation Learning", 2017.
+
+    """
+    def __init__(self, image_height, cond_channels=None,
+                 hid=256, in_dim=None):
+        super(NDRLLucasReconstructor, self).__init__(image_height=image_height)
+        del image_height  # unused
+        del cond_channels  # unused
+
+        layers = [
+            nn.Conv2d(in_dim or hid, hid, kernel_size=3, stride=1, padding=1)]
+        self.in_conv = nn.Sequential(*[l for l in layers if l is not None])
+
+        self.residual = nn.Sequential(NDRLResidual(relu_first=True),
+                                      NDRLResidual(relu_first=True),
+                                      nn.ReLU())
+        self.output_type = 'discrete'
+        out_ch = 3 * 256
+        layers = [
+            nn.ConvTranspose2d(hid, out_ch, kernel_size=4, stride=2, padding=1)]
+        self.conv = nn.Sequential(*[l for l in layers if l is not None])

@@ -62,6 +62,7 @@ class RepresentationLearner(streamtokenizer.StreamTokenizerNet):
                      num_tokens=16
                  ),
                  bottleneck_latent_dim=64,
+                 num_bottlenecks=1,
                  latent_mixer=dict(
                      class_name=convolutional.ConvStack1D,
                      hid_channels=64,
@@ -78,16 +79,25 @@ class RepresentationLearner(streamtokenizer.StreamTokenizerNet):
         super(RepresentationLearner, self).__init__(**kwargs)
         self.encoder = utils.construct_from_kwargs(
             encoder, additional_parameters={'in_channels': in_channels,
-                                            'image_height': image_height})
+                                            'image_height': image_height,
+                                            'out_dim': bottleneck_latent_dim * num_bottlenecks})
         # prevent affecting the encoder by the dummy minibatch
         self.encoder.eval()
         enc_out_shape = self.encoder(
-            torch.empty((1, 500, image_height, in_channels))).size()
+            torch.empty((1, image_height, image_height, in_channels))).size()
 
         self.bottleneck = utils.construct_from_kwargs(
             bottleneck, additional_parameters=dict(
-                in_dim=enc_out_shape[2] * enc_out_shape[3],
+                in_dim=enc_out_shape[2] * enc_out_shape[3] // num_bottlenecks,
                 latent_dim=bottleneck_latent_dim))
+        self.num_bottlenecks = num_bottlenecks
+
+        tokens_per_image = num_bottlenecks * enc_out_shape[1]
+        if hasattr(self.bottleneck, 'num_tokens'):
+            self.latent_bits = (tokens_per_image * np.log2(self.bottleneck.num_tokens)
+                                / image_height / image_height / in_channels)
+        else:
+            self.latent_bits = 10**6  # XXX
 
         self.latent_mixer = utils.construct_from_kwargs(
             latent_mixer,
@@ -114,7 +124,8 @@ class RepresentationLearner(streamtokenizer.StreamTokenizerNet):
             self.bottleneck_cond = utils.construct_from_kwargs(bottleneck_cond)
 
         rec_params = {'image_height': image_height,
-                      'cond_channels': cond_channels_spec}
+                      'cond_channels': cond_channels_spec,
+                      'in_dim': bottleneck_latent_dim * num_bottlenecks}
 
         # Compatibility with single-reconstructor checkpoints
         if 'class_name' in reconstructor:
@@ -266,6 +277,8 @@ class RepresentationLearner(streamtokenizer.StreamTokenizerNet):
                 all_inputs.append(inputs)
                 mean_field.append(rec.get_mean_field_preds(logits.detach()))
 
+        details['bits_per_dim'] = details['rec_loss'].item() / np.log(2) + self.latent_bits
+        # num_vq = self.bottleneck.num_bottlenecks
         details['rec_loss'] = sum(details.values())
         per_pix['rec_loss_per_pix'] = sum(per_pix.values())
         return (details['rec_loss'], {**details, **per_pix}, all_inputs,
@@ -306,13 +319,24 @@ class RepresentationLearner(streamtokenizer.StreamTokenizerNet):
                 continue
 
             if info['indices'] is not None:
+
+                if len(rec_img.size()) == 5:
+                    rec_img = rec_img[:,:,:,:,0]  # XXX Drop std for Gaussian outs
+
                 self.plot_image_segmentation(
-                    feats, rec_img, info['indices'], recon_name=name)
+                    # XXX Drop indices for multiple bottlenecks
+                    feats, rec_img, info['indices'][:, :, :, :1], recon_name=name)
 
             def log_img(name, img):
                 logger.log_images(name, img.permute(0, 2, 1, 3))
             name = '_' + name if name else name
             log_img(f'x{name}', rec_input[:4])
+
+            # XXX
+            if rec_img.size(-1) > 3:
+                n, h, w, d = rec_img.size()
+                rec_img = torch.argmax(rec_img.view(n, h, w, d // 256, 256), -1)
+
             log_img(f'p{name}', rec_img[:4])
             # TODO: make it generate less data
             if False and not self.training:
@@ -637,7 +661,7 @@ class RepresentationLearnerContinuousBN_CPC(streamtokenizer.StreamTokenizerNet):
                 tokens = utils.safe_squeeze(tokens, dim=3)
                 tokens = utils.safe_squeeze(tokens, dim=2)
 
-                feat_len = batch['features_len']
+                feat_len = batch.get('features_len', 1)  # XXX
                 alis_lens.append(feat_len)
 
                 # the tokens should match the rate of the alignment
