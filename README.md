@@ -8,7 +8,7 @@ Workshop](https://www.clsp.jhu.edu/workshops/19-workshop/).
 Papers:
 * [Unsupervised Neural Segmentation and Clustering for Unit Discovery in
 Sequential Data](https://pgr-workshop.github.io/img/PGR009.pdf) (see [egs/segmental](egs/segmental))
-* Robust Trainig of Vector Quantized Bottleneck Models (under review; see [egs/robustvq](egs/robustvq))
+* Robust Training of Vector Quantized Bottleneck Models (under review; see [egs/robustvq](egs/robustvq))
 * Neural Variational representation learning for spoken language (under review; TBA)
 
 ## Docker
@@ -31,12 +31,12 @@ Make sure to [load the environment](docs/environment.md). You can train models u
 ./train.sh egs/mnist/yamls/mlp.yaml runs/mnist/mlp
 ```
 `train.sh` is a tiny wrapper around `train.py` which saves the source code and captures
-all output to a file, which helps understanding old models.
+all output to a file, helping to recover the settings of finished experiments.
 
 Some useful command line options are:
--  `-c LAST` which resumes training from the last checkpoint.
+-  `-c LAST` resumes training from the last checkpoint.
    (It is safe to always use it, even during the first training run).
-- `-m param val` to override parameters in the config file, e.g., disable
+- `-m param val` overrides parameters from an experiment `.yaml` file; for instance, to disable
   weight noise:
 ```
 ./train.sh -c LAST egs/mnist/yamls/mlp.yaml runs/mnist -m Trainer.weight_noise 0.0
@@ -48,13 +48,13 @@ bash egs/scribblelens/download_data.sh
 ```
 
 ## Evaluating models
-The evaluate script can load a saved chackpoint and run its evaluation metrics:
+A saved checkpoint can be loaded and its evaluation metrics run with:
 ```
 python evaluate.py runs/mnist/mlp/
 ```
 
 ## Visualizing training
-We log to tensorboard, to view training stats run `tensorboard --logdir PATH_TO_RUN_FOLDER`.
+Progress of training is logged to Tensorboard. To view training stats run `tensorboard --logdir PATH_TO_RUN_FOLDER`.
 
 ## Contributing
 * All contributions are welcomed!

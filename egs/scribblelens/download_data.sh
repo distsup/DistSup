@@ -7,6 +7,7 @@ fi
 
 if [ ! -f $DISTSUP_DIR/data/scribblelens.corpus.v1.2.zip ]; then
     echo "Downloading scribblelens corpus..."
+    mkdir -p $DISTSUP_DIR/data
     url=http://www.openslr.org/resources/84/scribblelens.corpus.v1.2.zip
     wget $url -O $DISTSUP_DIR/data/scribblelens.corpus.v1.2.zip || exit 1
     echo "Done"
