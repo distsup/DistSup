@@ -1,0 +1,46 @@
+Datasets:
+  train:
+    class_name: FixedDatasetLoader
+    batch_size: 128
+    dataset:
+      class_name: egs.robustvq.data.CIFAR10
+      train: True
+    shuffle: True
+    num_workers: 8
+  test:
+    class_name: FixedDatasetLoader
+    batch_size: 128
+    dataset:
+      class_name: egs.robustvq.data.CIFAR10
+      train: False
+    shuffle: False
+    num_workers: 8
+
+Model:
+  class_name: distsup.models.feedforward.FeedForwardLearner
+  encoder:
+    class_name: distsup.models.feedforward.ConvEncoder
+    channels: 256
+    batch_norm: True
+  bottleneck:
+    class_name: distsup.modules.parallel_bottlenecks.ManyCodebooksEMABottleneck
+    num_codebooks: 8
+    num_embeddings: 128
+    embedding_dim: 32
+    normalization: batch_norm
+    log_input_norms: true
+  decoder:
+    class_name: distsup.models.feedforward.ConvDecoder
+    channels: 256
+    batch_norm: True
+
+Trainer:
+  checkpointer:
+    every_n_hours: 4
+  learning_rate: 0.0005
+  learning_rate_scheduler: null
+  output_frequency: 100
+  num_epochs: 2000
+  optimizer_name: Adam
+  polyak_decay:
+  - 0.998

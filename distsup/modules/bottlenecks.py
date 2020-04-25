@@ -203,6 +203,7 @@ class VQBottleneck(nn.Module):
                  input_projection=True,
                  ):
         super(VQBottleneck, self).__init__()
+
         # NOTE This might be Identity()
         self.batch_norm = Normalization(normalization, normalization_nary,
             in_dim, set_affine=normalization_set_affine)
@@ -211,8 +212,11 @@ class VQBottleneck(nn.Module):
         if input_projection:
             self.projection = nn.Linear(in_dim, latent_dim)
         else:
-            assert in_dim == latent_dim, f"No projection to bottleneck, input ({in_dim}) and latent ({latent_dim}) dims dont agree"
+            assert in_dim == latent_dim, (
+                f"No projection to bottleneck, input ({in_dim}) "
+                f"and latent ({latent_dim}) dims dont agree")
             self.projection = Identity()
+
         self.embedding = nn.Embedding(num_tokens, latent_dim)
         nn.init.xavier_uniform_(self.embedding.weight)
         self.num_tokens = num_tokens

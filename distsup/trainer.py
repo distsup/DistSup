@@ -147,6 +147,7 @@ class Trainer(object):
     def __init__(self, num_epochs, learning_rate,
                  optimizer_name, optimizer_kwargs={},
                  learning_rate_scheduler=DEFAULT_LR_SCHEDULER,
+                 custom_learning_rates=[],
                  checkpointer={},
                  checkpoint_frequency_within_epoch=None,
                  weight_noise=0, weight_noise_start_iteration=15000,
@@ -219,8 +220,13 @@ class Trainer(object):
         proto = getattr(torch.optim, self.optimizer_name)
 
         if self.codebook_lr is not None:
+
+            # emb might be nn.Parameter or nn.Embedding
+            emb = model.bottleneck.embedding
+            p = [emb] if not hasattr(emb, 'parameters') else emb.parameters()
+
             optimizer = proto(
-                [{'params': model.bottleneck.embedding.parameters(),
+                [{'params': p,
                   'lr': self.codebook_lr},
                  {'params': model.get_parameters_for_optimizer(with_codebook=False),
                   'lr': self.learning_rate}],
@@ -230,12 +236,18 @@ class Trainer(object):
                 model.get_parameters_for_optimizer(with_codebook=True),
                 lr=self.learning_rate, **self.optimizer_kwargs)
 
-        self.lr_scheduler_params['optimizer'] = optimizer
-        lr_scheduler = utils.construct_from_kwargs(self.lr_scheduler_params)
+        if self.lr_scheduler_params is not None:
+            self.lr_scheduler_params['optimizer'] = optimizer
+            lr_scheduler = utils.construct_from_kwargs(self.lr_scheduler_params)
+        else:
+            lr_scheduler = None
+
         if saved_state:
             optimizer.load_state_dict(saved_state['optimizer'])
-            lr_scheduler.load_state_dict(saved_state['lr_scheduler'])
+            if saved_state['lr_scheduler'] is not None:
+                lr_scheduler.load_state_dict(saved_state['lr_scheduler'])
         print(f"Optimizer: {optimizer}")
+        print(f"Scheduler: {lr_scheduler}")
 
         if saved_state:
             self.current_iteration = saved_state['current_iteration']
@@ -309,8 +321,9 @@ class Trainer(object):
                 probe.train()
         self.setup_polyak_decay(model)
         progress = Progress()
-        if not isinstance(lr_scheduler,
-                          torch.optim.lr_scheduler.ReduceLROnPlateau):
+        if (lr_scheduler is not None and 
+            not isinstance(lr_scheduler,
+                           torch.optim.lr_scheduler.ReduceLROnPlateau)):
             lr_scheduler.step()
 
         for batch_ind, batch in enumerate(train_dataset):
@@ -463,13 +476,9 @@ class Trainer(object):
                 for decay in self.polyak_decay:
                     name = '{}_polyak_{}'.format(k, decay)
                     polyak_dict_name = 'avg_state_dict_%f' % (decay)
-                    try:
-                        polyak_dict = getattr(model, polyak_dict_name)
-                        model.load_state_dict(polyak_dict)
-                        results[name] = eval_single_subset(
-                            name, eval_datasets[k])
-                    except:
-                        print ("evaluate() No avg_state_dict_ polyak dict found, skip." )
+                    polyak_dict = getattr(model, polyak_dict_name)
+                    model.load_state_dict(polyak_dict, strict=False)
+                    results[name] = eval_single_subset(name, eval_datasets[k])
                 model.load_state_dict(old_state)
 
         return results

@@ -58,19 +58,6 @@ class ConfigInstantiator(object):
         return self._getitem(key)
 
 
-class DatasetConfigInstantiator(ConfigInstantiator):
-    def _getitem(self, key, additional_parameters=None):
-        if key not in self.cache:
-            # make a copy since we may change the dict in the end
-            opts = dict(get_val(self.objects_config, key, self.name))
-            if 'class_name' not in opts:
-                opts['class_name'] = self.default_class_dict[key]
-            self.cache[key] = utils.construct_from_kwargs(
-                    opts, self.default_modules_dict.get(key),
-                    additional_parameters)
-        return self.cache[key]
-
-
 class _ConstantDict(object):
     def __init__(self, v, **kwargs):
         super(_ConstantDict, self).__init__(**kwargs)
@@ -119,7 +106,7 @@ class Configuration(ConfigInstantiator):
             name=config_path,
             **kwargs)
         if 'Datasets' in self.objects_config:
-            self.cache['Datasets'] = DatasetConfigInstantiator(
+            self.cache['Datasets'] = ConfigInstantiator(
                 self.objects_config['Datasets'],
                 default_modules_dict=_ConstantDict(
                         Configuration.default_modules_dict['Datasets']),

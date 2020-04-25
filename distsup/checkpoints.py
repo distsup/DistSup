@@ -230,7 +230,8 @@ class Checkpointer(object):
                 'epoch': epoch,
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
-                'lr_scheduler': lr_scheduler.state_dict(),
+                'lr_scheduler': (None if lr_scheduler is None
+                                 else lr_scheduler.state_dict()),
             }
             for k in model.__dict__:
                 if k.startswith('avg_state_dict'):
