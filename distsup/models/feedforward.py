@@ -127,6 +127,33 @@ class FeedForwardLearner(base.Model):
         # stats['distrib'] = dist
         return stats['loss'], stats
 
+    def evaluate(self, batches):
+        was_training = self.training
+        self.eval()
+        stats = None
+
+        for i,batch in enumerate(batches):
+            images = batch['features']
+            targets = ((images + 0.5) * 255).long()
+            with torch.no_grad():
+                _, batch_stats = self.minibatch_loss(batch)
+            stats = self.update_stats(stats, batch_stats, i)
+
+        if was_training:
+            self.train()
+
+        return stats
+
+    def update_stats(self, epoch_stats, batch_stats, it):
+        if epoch_stats is None:
+            return batch_stats
+        else:
+            for key, val in batch_stats.items():
+                if type(val) is torch.Tensor:
+                    val = val.item()
+                epoch_stats[key] += (val - epoch_stats[key]) / it
+            return epoch_stats
+
     # XXX Unused ?
     def parameters(self, with_codebook=True):
         if with_codebook:
