@@ -253,10 +253,10 @@ class StreamTokenizerNet(probednet.ProbedNet):
 
         return (
             {
-                f'many_es_to_one_gt_accuracy/{prefix}': (
+                f'{prefix}many_es_to_one_gt_accuracy': (
                     (alis_es_mapped == ali_gt).mean()
                 ),
-                f'one_es_to_one_gt_accuracy/{prefix}': (
+                f'{prefix}one_es_to_one_gt_accuracy': (
                     (one_to_one_mapped == ali_gt).mean()
                 ),
             },
